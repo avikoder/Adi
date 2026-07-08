@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en-IN">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Lock zoom / prevent accidental double-tap zoom, respect the notch -->
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+
+  <title>Aditi Makeup Artistry</title>
+  <meta name="description"
+        content="The private, offline booking studio for Aditi Makeup Artistry." />
+
+  <!-- PWA / theming -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#2E2530" />
+  <meta name="color-scheme" content="light" />
+
+  <!-- iOS / Apple-specific PWA meta -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Aditi" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+  <link rel="icon" type="image/png" href="favicon.png" />
+
+  <!-- Fonts: characterful display serif + native UI sans (best offline behaviour) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&display=swap"
+        rel="stylesheet" />
+
+  <!-- Tailwind (Play CDN) — cached by the service worker for offline use -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Guard: the Play CDN may be slow or unreachable on first load (offline).
+    // The local fallback utilities in <style> keep the layout correct either way.
+    window.tailwind && (tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            powder: '#FBF7F6',
+            ink: '#2E2530',
+            rose: '#B87189',
+            gold: '#C3A15E',
+            sage: '#7E8A5B'
+          },
+          fontFamily: {
+            serif: ['Fraunces', 'ui-serif', 'Georgia', 'serif']
+          }
+        }
+      }
+    });
+  </script>
+
+  <!-- QR code generator (client-side, cached offline; graceful fallback if unavailable) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <style>
+    :root {
+      --powder:     #FBF7F6;
+      --surface:    #FFFFFF;
+      --ink:        #2E2530;
+      --ink-soft:   #6C5F67;
+      --ink-faint:  #9C919A;
+      --rose:       #B87189;
+      --rose-deep:  #9A5872;
+      --rose-soft:  #F5E6EB;
+      --gold:       #C3A15E;
+      --gold-soft:  #F5ECD8;
+      --sage:       #6F7C4E;
+      --sage-soft:  #E9EEDD;
+      --amber:      #B87833;
+      --amber-soft: #F7EAD7;
+      --line:       rgba(46,37,48,0.09);
+      --line-soft:  rgba(46,37,48,0.05);
+      --shadow:     0 1px 2px rgba(46,37,48,0.04), 0 8px 24px -12px rgba(46,37,48,0.14);
+      --shadow-lg:  0 12px 40px -12px rgba(46,37,48,0.28);
+      --sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, system-ui, sans-serif;
+      --serif: 'Fraunces', ui-serif, Georgia, serif;
+      --safe-top:    env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    * { -webkit-tap-highlight-color: transparent; }
+
+    /* Local fallback for the few utility classes used, so the layout is
+       correct even before the Tailwind CDN loads (or if it never does, offline). */
+    .flex { display: flex; }
+    .grid { display: grid; }
+    .items-center { align-items: center; }
+    .items-start { align-items: flex-start; }
+    .items-baseline { align-items: baseline; }
+    .justify-between { justify-content: space-between; }
+    .gap-2 { gap: 0.5rem; }
+    .mt-1 { margin-top: 0.25rem; } .mt-2 { margin-top: 0.5rem; }
+    .mt-3 { margin-top: 0.75rem; } .mt-4 { margin-top: 1rem; } .mt-6 { margin-top: 1.5rem; }
+    .mb-1 { margin-bottom: 0.25rem; } .mb-2 { margin-bottom: 0.5rem; }
+    .mb-3 { margin-bottom: 0.75rem; } .mb-4 { margin-bottom: 1rem; }
+    .p-4 { padding: 1rem; }
+
+    html, body {
+      margin: 0;
+      background: var(--powder);
+      color: var(--ink);
+      font-family: var(--sans);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      overscroll-behavior-y: none;
+    }
+
+    body {
+      /* prevent accidental pinch / double-tap zoom on controls */
+      touch-action: manipulation;
+      min-height: 100vh;
+      min-height: 100dvh;
+    }
+
+    /* Native-feeling momentum scroll region */
+    .scroll {
+      -webkit-overflow-scrolling: touch;
+      overflow-y: auto;
+      overscroll-behavior-y: contain;
+    }
+
+    .serif { font-family: var(--serif); font-optical-sizing: auto; }
+
+    /* ---------- App frame ---------- */
+    #app {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      min-height: 100dvh;
+    }
+
+    header.topbar {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      padding: calc(var(--safe-top) + 14px) 20px 12px;
+      background: linear-gradient(180deg, rgba(251,247,246,0.94), rgba(251,247,246,0.72));
+      backdrop-filter: saturate(180%) blur(14px);
+      -webkit-backdrop-filter: saturate(180%) blur(14px);
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    main.viewport {
+      flex: 1;
+      padding: 8px 18px 132px;
+    }
+
+    .view { display: none; }
+    .view.active { display: block; animation: fade .28s ease both; }
+    @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+    /* ---------- Cards ---------- */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .eyebrow {
+      font-size: 11px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      font-weight: 600;
+    }
+
+    /* ---------- Status pills ---------- */
+    .pill {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em;
+      padding: 4px 10px; border-radius: 999px; white-space: nowrap;
+    }
+    .pill .dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+    .pill.upcoming { color: var(--rose-deep); background: var(--rose-soft); }
+    .pill.pending  { color: var(--amber);     background: var(--amber-soft); }
+    .pill.done     { color: var(--sage);      background: var(--sage-soft); }
+    .pill.today    { color: #7A4A2E;          background: #F6E7D9; }
+    .pill.gold     { color: #8A6A22;          background: var(--gold-soft); }
+
+    .tag {
+      display: inline-flex; align-items: center;
+      font-size: 11.5px; font-weight: 500; color: var(--ink-soft);
+      padding: 3px 9px; border-radius: 8px; background: var(--powder);
+      border: 1px solid var(--line);
+    }
+
+    /* ---------- Ready-by timeline (signature element) ---------- */
+    .tl { position: relative; padding-left: 74px; }
+    .tl::before {
+      content: ''; position: absolute; left: 63px; top: 6px; bottom: 6px;
+      width: 2px; background: linear-gradient(var(--rose-soft), var(--gold-soft));
+    }
+    .tl-item { position: relative; margin-bottom: 14px; }
+    .tl-item:last-child { margin-bottom: 0; }
+    .tl-time {
+      position: absolute; left: -74px; top: 2px; width: 56px; text-align: right;
+    }
+    .tl-time .h { font-family: var(--serif); font-size: 17px; font-weight: 600; line-height: 1; color: var(--ink); }
+    .tl-time .m { font-size: 10px; color: var(--ink-faint); letter-spacing: 0.05em; text-transform: uppercase; }
+    .tl-node {
+      position: absolute; left: -17px; top: 5px;
+      width: 12px; height: 12px; border-radius: 999px;
+      background: var(--surface); border: 2.5px solid var(--rose);
+      box-shadow: 0 0 0 4px var(--powder);
+    }
+    .tl-item.is-done .tl-node { border-color: var(--sage); background: var(--sage); }
+    .tl-item.is-soon .tl-node { border-color: var(--gold); }
+
+    /* ---------- Buttons ---------- */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+      font-weight: 600; font-size: 14px; border-radius: 14px;
+      padding: 11px 16px; border: 1px solid transparent; cursor: pointer;
+      min-height: 44px; transition: transform .12s ease, background .18s ease, box-shadow .18s ease;
+      user-select: none;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary { background: var(--ink); color: #fff; }
+    .btn-primary:active { background: #1f1922; }
+    .btn-rose { background: var(--rose); color: #fff; }
+    .btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--line); }
+    .btn-soft { background: var(--rose-soft); color: var(--rose-deep); }
+    .btn-sage { background: var(--sage); color: #fff; }
+    .btn-block { width: 100%; }
+    .btn-sm { min-height: 40px; padding: 9px 12px; font-size: 13px; border-radius: 12px; }
+
+    .icon-btn {
+      width: 44px; height: 44px; border-radius: 14px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--surface); border: 1px solid var(--line); color: var(--ink);
+    }
+    .icon-btn:active { transform: scale(0.94); }
+
+    /* ---------- Bottom tab bar ---------- */
+    nav.tabbar {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 45;
+      display: grid; grid-template-columns: repeat(5, 1fr);
+      align-items: end;
+      padding: 8px 10px calc(var(--safe-bottom) + 8px);
+      background: linear-gradient(180deg, rgba(255,255,255,0.72), rgba(255,255,255,0.96));
+      backdrop-filter: saturate(180%) blur(18px);
+      -webkit-backdrop-filter: saturate(180%) blur(18px);
+      border-top: 1px solid var(--line);
+    }
+    .tab {
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      padding: 6px 0; color: var(--ink-faint); font-size: 10.5px; font-weight: 600;
+      letter-spacing: 0.02em; min-height: 44px; justify-content: center;
+    }
+    .tab svg { width: 23px; height: 23px; stroke-width: 1.7; }
+    .tab.active { color: var(--rose-deep); }
+    .tab.active svg { stroke-width: 2.1; }
+    .tab-fab { margin-top: -26px; }
+    .fab {
+      width: 58px; height: 58px; border-radius: 20px;
+      background: linear-gradient(160deg, var(--rose), var(--rose-deep));
+      color: #fff; display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 10px 24px -8px rgba(154,88,114,0.7);
+      border: 3px solid var(--powder);
+    }
+    .fab:active { transform: scale(0.93); }
+    .fab svg { width: 26px; height: 26px; stroke-width: 2.2; }
+
+    /* ---------- Modal / sheet ---------- */
+    .overlay {
+      position: fixed; inset: 0; z-index: 60;
+      background: rgba(31,25,34,0.42);
+      backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px);
+      display: none; align-items: flex-end; justify-content: center;
+    }
+    .overlay.open { display: flex; animation: ovl .2s ease both; }
+    @keyframes ovl { from { opacity: 0; } to { opacity: 1; } }
+
+    .sheet {
+      width: 100%; max-width: 560px; max-height: 92dvh;
+      background: var(--powder);
+      border-radius: 26px 26px 0 0;
+      box-shadow: var(--shadow-lg);
+      display: flex; flex-direction: column;
+      animation: slide .3s cubic-bezier(.16,.84,.44,1) both;
+      padding-bottom: var(--safe-bottom);
+    }
+    @keyframes slide { from { transform: translateY(100%); } to { transform: none; } }
+    .sheet-grip { width: 38px; height: 5px; border-radius: 999px; background: var(--line); margin: 10px auto 2px; }
+    .sheet-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 6px 20px 12px; border-bottom: 1px solid var(--line-soft);
+    }
+    .sheet-body { padding: 18px 20px 26px; }
+
+    /* ---------- Form controls ---------- */
+    .field { margin-bottom: 15px; }
+    .label {
+      display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-soft);
+      margin-bottom: 7px; letter-spacing: 0.01em;
+    }
+    .input, .select, .textarea {
+      width: 100%; box-sizing: border-box;
+      background: var(--surface); border: 1px solid var(--line);
+      border-radius: 14px; padding: 13px 14px; font-size: 16px; /* 16px stops iOS zoom */
+      color: var(--ink); font-family: var(--sans); -webkit-appearance: none; appearance: none;
+      transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    .input:focus, .select:focus, .textarea:focus {
+      outline: none; border-color: var(--rose);
+      box-shadow: 0 0 0 3px var(--rose-soft);
+    }
+    .textarea { min-height: 74px; resize: vertical; }
+    .select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236C5F67' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 14px center; padding-right: 40px;
+    }
+    .input-money { position: relative; }
+    .input-money .rupee {
+      position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+      color: var(--ink-faint); font-weight: 600; pointer-events: none;
+    }
+    .input-money .input { padding-left: 30px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    .err { color: #B23B4E; font-size: 12px; margin-top: 6px; display: none; }
+    .field.invalid .input, .field.invalid .select { border-color: #D07F8C; box-shadow: 0 0 0 3px #F6E1E5; }
+    .field.invalid .err { display: block; }
+
+    /* Toggle */
+    .toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+      background: var(--surface); border: 1px solid var(--line);
+      border-radius: 14px; padding: 12px 14px;
+    }
+    .toggle-row .tlabel { font-size: 14px; font-weight: 600; }
+    .toggle-row .tsub { font-size: 12px; color: var(--ink-faint); margin-top: 2px; }
+    .switch { position: relative; width: 50px; height: 30px; flex: 0 0 auto; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .switch .track {
+      position: absolute; inset: 0; background: #E4DCE0; border-radius: 999px;
+      transition: background .2s ease; cursor: pointer;
+    }
+    .switch .track::before {
+      content: ''; position: absolute; height: 26px; width: 26px; left: 2px; top: 2px;
+      background: #fff; border-radius: 999px; transition: transform .2s ease;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+    .switch input:checked + .track { background: var(--sage); }
+    .switch input:checked + .track::before { transform: translateX(20px); }
+
+    /* Segmented control */
+    .seg { display: flex; background: var(--rose-soft); border-radius: 14px; padding: 3px; gap: 3px; }
+    .seg button {
+      flex: 1; border: none; background: transparent; color: var(--rose-deep);
+      font-weight: 600; font-size: 13px; padding: 8px 4px; border-radius: 11px; cursor: pointer;
+      min-height: 40px;
+    }
+    .seg button.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+
+    /* Toast */
+    #toast {
+      position: fixed; left: 50%; bottom: calc(var(--safe-bottom) + 96px);
+      transform: translateX(-50%) translateY(20px);
+      background: var(--ink); color: #fff; padding: 12px 18px; border-radius: 14px;
+      font-size: 14px; font-weight: 500; z-index: 80; box-shadow: var(--shadow-lg);
+      opacity: 0; pointer-events: none; transition: opacity .25s ease, transform .25s ease;
+      max-width: 88vw; text-align: center;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* QR */
+    #qrbox { display: flex; align-items: center; justify-content: center; }
+    #qrbox img, #qrbox canvas { border-radius: 12px; }
+
+    .divider { height: 1px; background: var(--line); margin: 18px 0; border: 0; }
+
+    .empty {
+      text-align: center; padding: 40px 20px; color: var(--ink-faint);
+    }
+    .empty svg { width: 42px; height: 42px; margin: 0 auto 12px; stroke: var(--rose); opacity: 0.7; }
+
+    .hairline { border-top: 1px solid var(--line); }
+
+    /* Reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <!-- ===================== HEADER ===================== -->
+    <header class="topbar">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="eyebrow" id="greeting">Good morning</p>
+          <h1 class="serif" id="headerTitle" style="font-size:26px; font-weight:600; line-height:1.0; margin:2px 0 0; letter-spacing:0.01em;">Aditi</h1>
+          <p style="font-size:10.5px; letter-spacing:0.24em; text-transform:uppercase; color:var(--gold); font-weight:600; margin-top:2px;">Makeup Artistry</p>
+        </div>
+        <button class="icon-btn" id="headerAction" aria-label="Settings" onclick="App.go('settings')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="21" height="21" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- ===================== VIEWPORT ===================== -->
+    <main class="viewport scroll">
+
+      <!-- HOME -->
+      <section class="view active" id="view-home">
+        <div id="reminderBanner"></div>
+        <div id="statStrip"></div>
+        <div id="todayBlock"></div>
+        <div id="upcomingBlock"></div>
+      </section>
+
+      <!-- BOOKINGS -->
+      <section class="view" id="view-bookings">
+        <div class="flex items-center justify-between mb-3 mt-1">
+          <h2 class="serif" style="font-size:24px; font-weight:600;">All bookings</h2>
+          <span class="tag" id="bookingCount">0</span>
+        </div>
+        <div class="mb-3">
+          <input class="input" id="searchInput" type="search" placeholder="Search by name, service or event…" oninput="App.renderBookings()" />
+        </div>
+        <div class="seg mb-4" id="filterSeg">
+          <button data-filter="all" class="active">All</button>
+          <button data-filter="upcoming">Upcoming</button>
+          <button data-filter="pending">Balance due</button>
+          <button data-filter="done">Done</button>
+        </div>
+        <div id="bookingsList"></div>
+      </section>
+
+      <!-- REMINDERS -->
+      <section class="view" id="view-reminders">
+        <h2 class="serif mb-1 mt-1" style="font-size:24px; font-weight:600;">Reminders</h2>
+        <p style="color:var(--ink-soft); font-size:13.5px; margin-bottom:16px;">
+          What needs your attention. Bookings for tomorrow are pinned to the top.
+        </p>
+        <div id="remindersList"></div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="view" id="view-settings">
+        <h2 class="serif mb-1 mt-1" style="font-size:24px; font-weight:600;">Settings</h2>
+        <p style="color:var(--ink-soft); font-size:13.5px; margin-bottom:18px;">
+          Your details power UPI collection links and WhatsApp messages. Everything stays on this device.
+        </p>
+
+        <div class="card p-4 mb-4">
+          <p class="eyebrow mb-3">Your studio</p>
+          <div class="field">
+            <label class="label" for="setName">Artist / studio name</label>
+            <input class="input" id="setName" type="text" placeholder="e.g. Aarohi Makeovers" />
+          </div>
+          <div class="field">
+            <label class="label" for="setPhone">Your WhatsApp number</label>
+            <input class="input" id="setPhone" type="tel" inputmode="numeric" placeholder="10-digit mobile number" />
+          </div>
+          <div class="field" style="margin-bottom:0;">
+            <label class="label" for="setUpi">UPI ID (for collecting payments)</label>
+            <input class="input" id="setUpi" type="text" autocapitalize="none" placeholder="e.g. aarohi@okhdfc" />
+          </div>
+        </div>
+
+        <div class="card p-4 mb-4">
+          <p class="eyebrow mb-3">Reminders</p>
+          <div class="toggle-row">
+            <div>
+              <div class="tlabel">Device notifications</div>
+              <div class="tsub" id="notifStatus">Get a heads-up for tomorrow's bookings</div>
+            </div>
+            <button class="btn btn-soft btn-sm" id="notifBtn" onclick="App.requestNotif()">Enable</button>
+          </div>
+          <p style="font-size:11.5px; color:var(--ink-faint); margin-top:10px; line-height:1.5;">
+            On iPhone, notifications work only after you add Aditi Makeup Artistry to your Home Screen. The in-app reminders on the Home tab always work, online or offline.
+          </p>
+        </div>
+
+        <div class="card p-4 mb-4">
+          <p class="eyebrow mb-3">Your data</p>
+          <div class="grid-2">
+            <button class="btn btn-ghost btn-sm" onclick="App.exportData()">Export backup</button>
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('importFile').click()">Import backup</button>
+          </div>
+          <input type="file" id="importFile" accept="application/json" hidden onchange="App.importData(event)" />
+          <button class="btn btn-ghost btn-sm btn-block mt-3" style="color:#B23B4E;" onclick="App.clearAll()">Erase all bookings</button>
+          <p style="font-size:11.5px; color:var(--ink-faint); margin-top:10px; line-height:1.5;">
+            Backups are plain JSON files saved through your device. Keep one safe — clearing Safari data will wipe the app's storage.
+          </p>
+        </div>
+
+        <p style="text-align:center; color:var(--ink-faint); font-size:12px; margin:22px 0 4px;">
+          Aditi Makeup Artistry · works fully offline
+        </p>
+      </section>
+    </main>
+
+    <!-- ===================== TAB BAR ===================== -->
+    <nav class="tabbar">
+      <button class="tab active" data-tab="home" onclick="App.go('home')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+        Home
+      </button>
+      <button class="tab" data-tab="bookings" onclick="App.go('bookings')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="17" rx="2.5"/><path d="M8 3v4M16 3v4M4 10h16"/></svg>
+        Bookings
+      </button>
+      <button class="tab tab-fab" onclick="App.openForm()">
+        <span class="fab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+      </button>
+      <button class="tab" data-tab="reminders" onclick="App.go('reminders')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+        <span id="reminderBadgeWrap">Reminders</span>
+      </button>
+      <button class="tab" data-tab="settings" onclick="App.go('settings')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Settings
+      </button>
+    </nav>
+  </div>
+
+  <!-- ===================== BOOKING FORM SHEET ===================== -->
+  <div class="overlay" id="formOverlay">
+    <div class="sheet">
+      <div class="sheet-grip"></div>
+      <div class="sheet-head">
+        <button class="btn btn-sm" style="background:none;color:var(--ink-soft);padding-left:0;" onclick="App.closeForm()">Cancel</button>
+        <h3 class="serif" id="formTitle" style="font-size:19px; font-weight:600;">New booking</h3>
+        <button class="btn btn-sm" style="background:none;color:var(--rose-deep);font-weight:700;padding-right:0;" onclick="App.saveBooking()">Save</button>
+      </div>
+      <div class="sheet-body scroll">
+        <form id="bookingForm" onsubmit="return false;" novalidate>
+          <input type="hidden" id="f-id" />
+
+          <p class="eyebrow mb-2">Client</p>
+          <div class="field" id="wrap-name">
+            <label class="label" for="f-name">Client name</label>
+            <input class="input" id="f-name" type="text" autocomplete="off" placeholder="Full name" />
+            <p class="err">Please add the client's name.</p>
+          </div>
+          <div class="field" id="wrap-phone">
+            <label class="label" for="f-phone">Contact number</label>
+            <input class="input" id="f-phone" type="tel" inputmode="numeric" placeholder="10-digit mobile" />
+            <p class="err">Enter a valid 10-digit number.</p>
+          </div>
+          <div class="grid-2">
+            <div class="field">
+              <label class="label" for="f-service">Service</label>
+              <select class="select" id="f-service">
+                <option>Bridal Makeup</option>
+                <option>Party Makeup</option>
+                <option>Hairstyling</option>
+                <option>Engagement Makeup</option>
+                <option>HD / Airbrush</option>
+                <option>Groom Styling</option>
+                <option>Other</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="label" for="f-event">Event type</label>
+              <select class="select" id="f-event">
+                <option>Maharashtrian Wedding</option>
+                <option>Haldi</option>
+                <option>Mehendi</option>
+                <option>Sangeet</option>
+                <option>Reception</option>
+                <option>Engagement</option>
+                <option>Party</option>
+                <option>Photoshoot</option>
+                <option>Other</option>
+              </select>
+            </div>
+          </div>
+
+          <hr class="divider" />
+          <p class="eyebrow mb-2">Schedule</p>
+          <div class="field" id="wrap-date">
+            <label class="label" for="f-date">Date <span id="f-day" style="color:var(--rose-deep);font-weight:700;"></span></label>
+            <input class="input" id="f-date" type="date" onchange="App.onDateChange()" />
+            <p class="err">Please pick a date.</p>
+          </div>
+          <div class="grid-2">
+            <div class="field">
+              <label class="label" for="f-ready">Ready-by time</label>
+              <input class="input" id="f-ready" type="time" />
+            </div>
+            <div class="field">
+              <label class="label" for="f-muhurat">Event / Muhurat</label>
+              <input class="input" id="f-muhurat" type="time" />
+            </div>
+          </div>
+
+          <hr class="divider" />
+          <p class="eyebrow mb-2">Payment</p>
+          <div class="grid-2">
+            <div class="field">
+              <label class="label" for="f-total">Package price</label>
+              <div class="input-money"><span class="rupee">₹</span>
+                <input class="input" id="f-total" type="number" inputmode="numeric" min="0" placeholder="0" oninput="App.recalc()" />
+              </div>
+            </div>
+            <div class="field">
+              <label class="label" for="f-advance">Advance paid</label>
+              <div class="input-money"><span class="rupee">₹</span>
+                <input class="input" id="f-advance" type="number" inputmode="numeric" min="0" placeholder="0" oninput="App.recalc()" />
+              </div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="label" for="f-travel">Travel</label>
+            <select class="select" id="f-travel" onchange="App.onTravelChange()">
+              <option value="studio">In-Studio</option>
+              <option value="local">Within Pune City (Local)</option>
+              <option value="outstation">Outstation (PCMC / Other)</option>
+            </select>
+          </div>
+          <div class="field" id="wrap-surcharge" style="display:none;">
+            <label class="label" for="f-surcharge">Travel / cab surcharge</label>
+            <div class="input-money"><span class="rupee">₹</span>
+              <input class="input" id="f-surcharge" type="number" inputmode="numeric" min="0" placeholder="0" oninput="App.recalc()" />
+            </div>
+          </div>
+
+          <div class="card p-4" style="background:var(--surface); border-radius:16px;">
+            <div class="flex items-center justify-between" style="font-size:13.5px; color:var(--ink-soft);">
+              <span>Package + travel</span><span id="calc-grand" style="font-weight:600;color:var(--ink);">₹0</span>
+            </div>
+            <div class="flex items-center justify-between mt-2" style="font-size:13.5px; color:var(--ink-soft);">
+              <span>Advance received</span><span id="calc-adv" style="font-weight:600;color:var(--sage);">₹0</span>
+            </div>
+            <hr class="divider" style="margin:12px 0;" />
+            <div class="flex items-center justify-between">
+              <span class="serif" style="font-size:16px;font-weight:600;">Balance due</span>
+              <span class="serif" id="calc-balance" style="font-size:20px;font-weight:700;color:var(--rose-deep);">₹0</span>
+            </div>
+          </div>
+
+          <hr class="divider" />
+          <p class="eyebrow mb-2">Logistics</p>
+          <div class="toggle-row mb-3">
+            <div><div class="tlabel">Accommodation included</div><div class="tsub">Stay arranged for outstation events</div></div>
+            <label class="switch"><input type="checkbox" id="f-accom" /><span class="track"></span></label>
+          </div>
+          <div class="toggle-row mb-3">
+            <div><div class="tlabel">Mark as completed</div><div class="tsub">Job done &amp; wrapped up</div></div>
+            <label class="switch"><input type="checkbox" id="f-done" /><span class="track"></span></label>
+          </div>
+
+          <div class="field" style="margin-top:15px;">
+            <label class="label" for="f-notes">Notes <span style="color:var(--ink-faint);font-weight:400;">(optional)</span></label>
+            <textarea class="textarea" id="f-notes" placeholder="Trial done, saree colour, references, parking…"></textarea>
+          </div>
+
+          <button class="btn btn-primary btn-block" style="margin-top:6px;" onclick="App.saveBooking()">Save booking</button>
+          <button class="btn btn-block" id="deleteBtn" style="margin-top:10px; background:none; color:#B23B4E; display:none;" onclick="App.deleteFromForm()">Delete booking</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== PAYMENT SHEET ===================== -->
+  <div class="overlay" id="payOverlay">
+    <div class="sheet">
+      <div class="sheet-grip"></div>
+      <div class="sheet-head">
+        <span style="width:52px;"></span>
+        <h3 class="serif" style="font-size:19px; font-weight:600;">Collect payment</h3>
+        <button class="btn btn-sm" style="background:none;color:var(--ink-soft);font-weight:600;padding-right:0;" onclick="App.closePay()">Done</button>
+      </div>
+      <div class="sheet-body scroll" id="payBody"><!-- rendered by JS --></div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
